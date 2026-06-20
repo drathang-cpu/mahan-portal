@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MAHAN Trust — Admin Portal</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --green:#1b7a4b; --green-dark:#13593a; --green-light:#e8f3ec;
+    --amber:#e0a82e; --ink:#1f2a24; --muted:#6b7c72; --line:#e2e8e4;
+    --bg:#f5f8f6; --card:#ffffff; --danger:#c0392b; --radius:12px;
+    --shadow:0 1px 3px rgba(20,60,40,.08),0 4px 16px rgba(20,60,40,.05);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);}
+  a{color:var(--green-dark)}
+  .hidden{display:none!important}
+  /* ---------- login ---------- */
+  .auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--green-dark),var(--green));padding:20px}
+  .auth-card{background:#fff;border-radius:16px;width:100%;max-width:380px;padding:34px 30px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .auth-card .mark{width:52px;height:52px;border-radius:14px;background:var(--green);color:#fff;display:grid;place-items:center;font-weight:800;font-size:24px;margin:0 auto 14px}
+  .auth-card h1{text-align:center;font-size:20px;margin:0 0 2px}
+  .auth-card p.tag-line{text-align:center;color:var(--muted);font-size:12.5px;margin:0 0 22px}
+  .auth-card .field{margin-bottom:14px}
+  .auth-card label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px}
+  .auth-card input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .auth-msg{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:14px}
+  .auth-msg.err{background:#fdecea;color:var(--danger)}
+  .auth-msg.ok{background:var(--green-light);color:var(--green-dark)}
+  .link-btn{background:none;border:none;color:var(--green-dark);font-size:12.5px;cursor:pointer;padding:0;text-decoration:underline}
+  /* ---------- app shell ---------- */
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:248px;background:linear-gradient(180deg,var(--green-dark),var(--green));color:#fff;display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;z-index:20}
+  .brand{padding:22px 20px 18px;border-bottom:1px solid rgba(255,255,255,.15)}
+  .brand .logo{display:flex;align-items:center;gap:10px}
+  .brand .mark{width:38px;height:38px;border-radius:10px;background:#fff;color:var(--green-dark);display:grid;place-items:center;font-weight:800;font-size:17px}
+  .brand h1{font-size:16px;margin:0;font-weight:700}
+  .brand p{margin:3px 0 0;font-size:11px;opacity:.8}
+  nav{padding:12px 10px;overflow-y:auto;flex:1}
+  nav .group{font-size:10px;text-transform:uppercase;letter-spacing:1px;opacity:.55;margin:14px 12px 6px}
+  nav button{width:100%;text-align:left;background:none;border:none;color:#eafaf0;padding:10px 12px;border-radius:8px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:11px;transition:.15s}
+  nav button:hover{background:rgba(255,255,255,.1)}
+  nav button.active{background:#fff;color:var(--green-dark);font-weight:600}
+  nav .ic{width:18px;text-align:center;font-size:15px}
+  .side-foot{padding:14px 18px;font-size:11px;opacity:.75;border-top:1px solid rgba(255,255,255,.15)}
+  .main{margin-left:248px;flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{background:var(--card);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+  .topbar h2{margin:0;font-size:19px}
+  .topbar .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .tb-right{display:flex;align-items:center;gap:12px}
+  .btn{background:var(--green);color:#fff;border:none;padding:9px 15px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+  .btn:hover{background:var(--green-dark)}
+  .btn.ghost{background:#fff;color:var(--green-dark);border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--green-light)}
+  .btn.sm{padding:6px 11px;font-size:12px}
+  .btn.danger{background:#fff;color:var(--danger);border:1px solid #f0d4d0}
+  .btn.danger:hover{background:#fdecea}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .who{text-align:right;font-size:12px;line-height:1.2}
+  .who b{font-size:13px}
+  .who .role{color:var(--muted)}
+  .avatar{width:34px;height:34px;border-radius:50%;background:var(--green-light);color:var(--green-dark);display:grid;place-items:center;font-weight:700;font-size:13px}
+  .content{padding:26px 28px 60px;max-width:1180px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:24px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+  .stat .label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .stat .num{font-size:28px;font-weight:800;margin-top:6px;color:var(--green-dark)}
+  .stat .delta{font-size:12px;margin-top:4px;color:var(--muted)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:18px}
+  .card h3{margin:0;padding:16px 18px;border-bottom:1px solid var(--line);font-size:15px}
+  .card .body{padding:16px 18px}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .toolbar input[type=search]{flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;padding:11px 14px;background:#f0f5f2;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+  td{padding:11px 14px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:#fafcfb}
+  .tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+  .tag.green{background:var(--green-light);color:var(--green-dark)}
+  .tag.amber{background:#fdf3dc;color:#9a7212}
+  .tag.red{background:#fdecea;color:var(--danger)}
+  .tag.grey{background:#eef2f0;color:var(--muted)}
+  .row-actions{display:flex;gap:6px}
+  .icon-btn{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px;padding:4px 6px;border-radius:6px}
+  .icon-btn:hover{background:#eef2f0;color:var(--ink)}
+  .empty{padding:40px;text-align:center;color:var(--muted);font-size:14px}
+  .overlay{position:fixed;inset:0;background:rgba(20,40,30,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal h3{margin:0;padding:18px 22px;border-bottom:1px solid var(--line);font-size:16px}
+  .modal .body{padding:20px 22px}
+  .modal .foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px}
+  .field input,.field select,.field textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;font-family:inherit}
+  .field.half{display:inline-block;width:calc(50% - 7px)}
+  .field.half:nth-child(odd){margin-right:14px}
+  .programs{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+  .prog{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);border-top:4px solid var(--green)}
+  .prog .pic{font-size:26px}
+  .prog h4{margin:10px 0 6px;font-size:16px}
+  .prog p{margin:0;font-size:13px;color:var(--muted);line-height:1.5}
+  .loading{padding:40px;text-align:center;color:var(--muted)}
+  .config-warn{max-width:640px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:14px;padding:30px;box-shadow:var(--shadow)}
+  .config-warn h2{margin-top:0;color:var(--green-dark)}
+  .config-warn code{background:#f0f5f2;padding:2px 6px;border-radius:5px;font-size:13px}
+  @media(max-width:860px){
+    .sidebar{transform:translateX(-100%);transition:.25s}
+    .sidebar.open{transform:none}
+    .main{margin-left:0}
+    .grid-2{grid-template-columns:1fr}
+    .menu-toggle{display:block!important}
+  }
+  .menu-toggle{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--green-dark)}
+</style>
+</head>
+<body>
+
+<!-- ============================================================= -->
+<!--  CONFIG — paste your Supabase values here (see setup guide)   -->
+<!-- ============================================================= -->
+<script>
+  const SUPABASE_URL      = "https://tfgvhxreacvlamwwlplp.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_gTBWgqsAlWwnaTyQvFV8lQ_RVnWy2A9";
+</script>
+
+<!-- Config-not-set screen -->
+<div id="configScreen" class="hidden">
+  <div class="config-warn">
+    <h2>⚙️ One-time setup needed</h2>
+    <p>This portal isn't connected to your database yet. Open <code>index.html</code> in a text editor and replace the two values near the top:</p>
+    <p><code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code></p>
+    <p>You'll find both in your Supabase project under <strong>Project Settings → API</strong>. Full instructions are in <strong>SETUP_GUIDE.md</strong>.</p>
+  </div>
+</div>
+
+<!-- Login screen -->
+<div id="authScreen" class="auth-wrap hidden">
+  <div class="auth-card">
+    <div class="mark">M</div>
+    <h1>MAHAN Trust</h1>
+    <p class="tag-line">Admin Portal · staff sign in</p>
+    <div id="authMsg" class="auth-msg hidden"></div>
+    <div class="field"><label>Email</label><input id="authEmail" type="email" autocomplete="username" placeholder="you@mahantrust.org"></div>
+    <div class="field"><label>Password</label><input id="authPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn" id="signInBtn" style="width:100%;margin-top:4px">Sign in</button>
+    <p style="text-align:center;margin:16px 0 0"><button class="link-btn" id="forgotBtn">Forgot password?</button></p>
+    <p style="text-align:center;margin:18px 0 0;font-size:11.5px;color:var(--muted)">Access is invite-only. Ask an admin to create your account.</p>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="appScreen" class="app hidden">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">
+        <div class="mark">M</div>
+        <div><h1>MAHAN Trust</h1><p>Admin Portal · Melghat</p></div>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">Serving tribal Melghat since 1997.<br>Meditation · AIDS · Health · De-Addiction · Nutrition</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <div><h2 id="pageTitle">Dashboard</h2><div class="sub" id="pageSub">Overview of all activities</div></div>
+      </div>
+      <div class="tb-right">
+        <div class="who"><b id="whoName">—</b><div class="role" id="whoRole"></div></div>
+        <div class="avatar" id="whoAvatar">·</div>
+        <button class="btn ghost sm" onclick="signOut()">Sign out</button>
+      </div>
+    </header>
+    <div class="content" id="view"><div class="loading">Loading…</div></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modalTitle">Add</h3>
+    <div class="body" id="modalBody"></div>
+    <div class="foot">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="modalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   Boot: check config, init Supabase, route to login or app
+   ========================================================= */
+let sb=null, ME=null;          // ME = {id,email,full_name,role}
+const $ = id => document.getElementById(id);
+
+function configMissing(){
+  return !SUPABASE_URL || SUPABASE_URL.includes('YOUR-PROJECT') ||
+         !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes('YOUR-ANON');
+}
+function show(screen){ ['configScreen','authScreen','appScreen'].forEach(s=>$(s).classList.toggle('hidden',s!==screen)); }
+
+async function boot(){
+  if(configMissing()){ show('configScreen'); return; }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data:{ session } } = await sb.auth.getSession();
+  if(session) await startApp(); else show('authScreen');
+  sb.auth.onAuthStateChange((_e,s)=>{ if(!s) show('authScreen'); });
+}
+
+/* ---------- Auth ---------- */
+function authMsg(text,kind){ const m=$('authMsg'); m.textContent=text; m.className='auth-msg '+(kind||'err'); m.classList.toggle('hidden',!text); }
+
+async function signIn(){
+  const email=$('authEmail').value.trim(), pass=$('authPass').value;
+  if(!email||!pass){ authMsg('Enter your email and password.'); return; }
+  $('signInBtn').disabled=true; authMsg('');
+  const { error } = await sb.auth.signInWithPassword({ email, password:pass });
+  $('signInBtn').disabled=false;
+  if(error){ authMsg(error.message); return; }
+  await startApp();
+}
+async function forgotPass(){
+  const email=$('authEmail').value.trim();
+  if(!email){ authMsg('Type your email above first, then click “Forgot password”.'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email,{ redirectTo: window.location.href });
+  authMsg(error? error.message : 'Password reset link sent — check your email.', error?'err':'ok');
+}
+async function signOut(){ await sb.auth.signOut(); ME=null; show('authScreen'); }
+
+async function startApp(){
+  const { data:{ user } } = await sb.auth.getUser();
+  let { data:profile } = await sb.from('profiles').select('*').eq('id',user.id).single();
+  if(!profile){ profile={ id:user.id, email:user.email, full_name:user.email, role:'staff' }; }
+  ME = profile;
+  $('whoName').textContent = ME.full_name || ME.email;
+  $('whoRole').textContent = ME.role==='admin' ? 'Administrator' : 'Staff';
+  $('whoAvatar').textContent = initials(ME.full_name||ME.email);
+  show('appScreen');
+  buildNav();
+  go('dashboard');
+}
+function initials(s){ return (s||'?').split(/[ @.]/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join(''); }
+
+/* =========================================================
+   Navigation
+   ========================================================= */
+const NAV = [
+  {group:'Overview',items:[{id:'dashboard',ic:'📊',label:'Dashboard',sub:'Overview of all activities'}]},
+  {group:'Operations',items:[
+    {id:'beneficiaries',ic:'🧑‍⚕️',label:'Beneficiaries',sub:'Patient & beneficiary register'},
+    {id:'programs',ic:'🌿',label:'Programs',sub:'The five MAHAN pillars'},
+    {id:'tasks',ic:'✅',label:'Tasks',sub:'Administrative tasks & to-dos'},
+    {id:'inventory',ic:'📦',label:'Inventory',sub:'Medicines & supplies'},
+    {id:'events',ic:'📅',label:'Calendar',sub:'Camps, meetings & events'},
+  ]},
+  {group:'People & Funds',items:[
+    {id:'staff_members',ic:'👥',label:'Staff',sub:'Team & volunteers'},
+    {id:'donors',ic:'🤝',label:'Donors & Grants',sub:'Funding & fundraising'},
+  ]},
+  {group:'System',items:[
+    {id:'users',ic:'🔐',label:'User Accounts',sub:'Manage staff logins & roles',adminOnly:true},
+  ]},
+];
+let current='dashboard', search='';
+function buildNav(){
+  const nav=$('nav'); nav.innerHTML='';
+  NAV.forEach(g=>{
+    const items=g.items.filter(i=>!i.adminOnly || ME.role==='admin');
+    if(!items.length) return;
+    const h=document.createElement('div'); h.className='group'; h.textContent=g.group; nav.appendChild(h);
+    items.forEach(it=>{
+      const b=document.createElement('button'); b.innerHTML=`<span class="ic">${it.ic}</span>${it.label}`;
+      b.onclick=()=>go(it.id); b.dataset.id=it.id; nav.appendChild(b);
+    });
+  });
+}
+function go(id){
+  current=id; search='';
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.id===id));
+  const meta=NAV.flatMap(g=>g.items).find(i=>i.id===id);
+  $('pageTitle').textContent=meta.label; $('pageSub').textContent=meta.sub;
+  $('sidebar').classList.remove('open');
+  render();
+}
+
+/* =========================================================
+   Data layer (Supabase)
+   ========================================================= */
+async function fetchAll(table){
+  const { data, error } = await sb.from(table).select('*').order('created_at',{ascending:false});
+  if(error){ alert('Error loading '+table+': '+error.message); return []; }
+  return data||[];
+}
+const inr = n => '₹'+Number(n||0).toLocaleString('en-IN');
+
+/* =========================================================
+   Render
+   ========================================================= */
+async function render(){
+  const v=$('view'); v.innerHTML='<div class="loading">Loading…</div>';
+  if(current==='dashboard')      await renderDashboard(v);
+  else if(current==='programs')  v.innerHTML=programsHTML();
+  else if(current==='users')     await renderUsers(v);
+  else                           await renderTable(v,current);
+}
+
+async function renderDashboard(v){
+  const [ben,stf,don,inv,tsk,evt] = await Promise.all(
+    ['beneficiaries','staff_members','donors','inventory','tasks','events'].map(fetchAll));
+  const lowStock=inv.filter(i=>i.qty<=i.reorder).length;
+  const openTasks=tsk.filter(t=>t.status!=='Done').length;
+  const funds=don.filter(d=>d.status==='Received').reduce((s,d)=>s+Number(d.amount||0),0);
+  v.innerHTML=`
+  <div class="stats">
+    <div class="stat"><div class="label">Beneficiaries</div><div class="num">${ben.length}</div><div class="delta">in register</div></div>
+    <div class="stat"><div class="label">Active staff</div><div class="num">${stf.filter(s=>s.status==='Active').length}</div><div class="delta">team & volunteers</div></div>
+    <div class="stat"><div class="label">Funds received</div><div class="num">${inr(funds)}</div><div class="delta">recorded</div></div>
+    <div class="stat"><div class="label">Open tasks</div><div class="num">${openTasks}</div><div class="delta">${lowStock} stock alerts</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><h3>Beneficiaries by program</h3><div class="body"><canvas id="progChart" height="200"></canvas></div></div>
+    <div class="card"><h3>Funding by source</h3><div class="body"><canvas id="fundChart" height="200"></canvas></div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><h3>Upcoming events</h3><div class="body" style="padding:0"><table><tbody>
+      ${evt.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td><span class="tag grey">${esc(e.type)}</span></td><td>${fmtDate(e.date)}</td></tr>`).join('')||'<tr><td class="empty">No events yet.</td></tr>'}
+    </tbody></table></div></div>
+    <div class="card"><h3>Tasks needing attention</h3><div class="body" style="padding:0"><table><tbody>
+      ${tsk.filter(t=>t.status!=='Done').slice(0,5).map(t=>`<tr><td><strong>${esc(t.title)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(t.owner)}</span></td><td>${prTag(t.priority)}</td><td>${fmtDate(t.due)}</td></tr>`).join('')||'<tr><td class="empty">Nothing pending.</td></tr>'}
+    </tbody></table></div></div>
+  </div>`;
+  const pc={}; ben.forEach(p=>pc[p.program]=(pc[p.program]||0)+1);
+  new Chart($('progChart'),{type:'doughnut',data:{labels:Object.keys(pc),datasets:[{data:Object.values(pc),backgroundColor:['#1b7a4b','#e0a82e','#3a8f9c','#9c6b3a','#7a4b8f']}]},options:{plugins:{legend:{position:'bottom'}}}});
+  new Chart($('fundChart'),{type:'bar',data:{labels:don.map(d=>d.name),datasets:[{label:'₹',data:don.map(d=>Number(d.amount||0)),backgroundColor:'#1b7a4b'}]},options:{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'₹'+(v/100000)+'L'}}}}});
+}
+
+function programsHTML(){
+  const data=[
+    {pic:'🧘',t:'Meditation',d:'Mental wellbeing and stress relief for tribal communities and patients.'},
+    {pic:'🎗️',t:'AIDS',d:'HIV/AIDS awareness, testing, counselling and treatment support.'},
+    {pic:'🏥',t:'Health',d:'Primary and intensive care at Mahatma Gandhi Tribal Hospital — 150,000+ treated.'},
+    {pic:'🚭',t:'De-Addiction',d:'Counselling and rehabilitation for alcohol and tobacco addiction.'},
+    {pic:'🍲',t:'Nutrition',d:'Child malnutrition screening and therapeutic feeding — 75% reduction achieved.'},
+  ];
+  return `<div class="programs">${data.map(p=>`<div class="prog"><div class="pic">${p.pic}</div><h4>${p.t}</h4><p>${p.d}</p></div>`).join('')}</div>`;
+}
+
+/* ---------- Generic table modules ---------- */
+const TABLES = {
+  beneficiaries:{title:'Beneficiaries',cols:[
+    {k:'name',l:'Name'},{k:'village',l:'Village'},{k:'age',l:'Age'},{k:'program',l:'Program',tag:1},{k:'status',l:'Status',tag:1},{k:'visit',l:'Last visit',date:1}],
+    fields:[{k:'name',l:'Full name'},{k:'village',l:'Village',half:1},{k:'age',l:'Age',type:'number',half:1},
+    {k:'program',l:'Program',opt:['Health','Nutrition','AIDS','De-Addiction','Meditation']},
+    {k:'status',l:'Status',opt:['Active','Follow-up','Discharged']},{k:'visit',l:'Last visit',type:'date'}]},
+  staff_members:{title:'Staff',cols:[
+    {k:'name',l:'Name'},{k:'role',l:'Role'},{k:'dept',l:'Department'},{k:'phone',l:'Phone'},{k:'status',l:'Status',tag:1}],
+    fields:[{k:'name',l:'Full name'},{k:'role',l:'Role'},{k:'dept',l:'Department',opt:['Medical','Outreach','Administration','Support']},
+    {k:'phone',l:'Phone',half:1},{k:'status',l:'Status',opt:['Active','On leave','Inactive'],half:1}]},
+  donors:{title:'Donors & Grants',cols:[
+    {k:'name',l:'Source'},{k:'type',l:'Type',tag:1},{k:'amount',l:'Amount',money:1},{k:'date',l:'Date',date:1},{k:'status',l:'Status',tag:1}],
+    fields:[{k:'name',l:'Source / donor name'},{k:'type',l:'Type',opt:['Grant','Donation','CSR','In-kind'],half:1},
+    {k:'amount',l:'Amount (₹)',type:'number',half:1},{k:'date',l:'Date',type:'date',half:1},{k:'status',l:'Status',opt:['Pledged','Received','Overdue'],half:1}]},
+  inventory:{title:'Inventory',cols:[
+    {k:'item',l:'Item'},{k:'category',l:'Category',tag:1},{k:'qty',l:'In stock'},{k:'unit',l:'Unit'},{k:'reorder',l:'Reorder at'}],
+    fields:[{k:'item',l:'Item name'},{k:'category',l:'Category',opt:['Medicine','Nutrition','Supplies','Equipment'],half:1},
+    {k:'unit',l:'Unit',half:1},{k:'qty',l:'Quantity in stock',type:'number',half:1},{k:'reorder',l:'Reorder level',type:'number',half:1}]},
+  tasks:{title:'Tasks',cols:[
+    {k:'title',l:'Task'},{k:'owner',l:'Owner'},{k:'priority',l:'Priority',tag:1},{k:'due',l:'Due',date:1},{k:'status',l:'Status',tag:1}],
+    fields:[{k:'title',l:'Task'},{k:'owner',l:'Owner'},{k:'priority',l:'Priority',opt:['High','Medium','Low'],half:1},
+    {k:'due',l:'Due date',type:'date',half:1},{k:'status',l:'Status',opt:['Open','In progress','Done']}]},
+  events:{title:'Calendar',cols:[
+    {k:'title',l:'Event'},{k:'type',l:'Type',tag:1},{k:'date',l:'Date',date:1}],
+    fields:[{k:'title',l:'Event title'},{k:'type',l:'Type',opt:['Camp','Meeting','Program','Training'],half:1},{k:'date',l:'Date',type:'date',half:1}]},
+};
+
+async function renderTable(v,id){
+  const cfg=TABLES[id];
+  const all=await fetchAll(id);
+  const rows=all.filter(r=>JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
+  v.innerHTML=`
+  <div class="toolbar">
+    <input type="search" placeholder="Search ${cfg.title.toLowerCase()}…" value="${esc(search)}" oninput="search=this.value;render()">
+    <button class="btn" onclick="openModal('${id}')">+ Add ${cfg.title.replace(/s$/,'')}</button>
+  </div>
+  <div class="card"><div class="body" style="padding:0">
+  ${rows.length?`<table><thead><tr>${cfg.cols.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr></thead>
+  <tbody>${rows.map(r=>`<tr>${cfg.cols.map(c=>`<td>${cell(r,c,id)}</td>`).join('')}
+    <td><div class="row-actions">
+      <button class="icon-btn" title="Edit" onclick="openModal('${id}','${r.id}')">✎</button>
+      <button class="icon-btn" title="Delete" onclick="del('${id}','${r.id}')">🗑</button>
+    </div></td></tr>`).join('')}</tbody></table>`
+  :`<div class="empty">No records${search?' match your search':' yet'}. Click “Add” to create one.</div>`}
+  </div></div>`;
+}
+function cell(r,c,id){
+  let val=r[c.k];
+  if(c.money) return inr(val);
+  if(c.date)  return fmtDate(val);
+  if(c.tag){ if(c.k==='priority')return prTag(val); if(c.k==='status')return statusTag(val); return `<span class="tag green">${esc(val)}</span>`; }
+  if(id==='inventory'&&c.k==='qty'&&r.qty<=r.reorder) return `${val} <span class="tag red">low</span>`;
+  return val==null||val===''?'—':esc(val);
+}
+function prTag(p){return `<span class="tag ${p==='High'?'red':p==='Medium'?'amber':'grey'}">${esc(p)}</span>`;}
+function statusTag(s){const m={'Active':'green','Received':'green','Done':'green','In progress':'amber','Follow-up':'amber','Pledged':'amber','Open':'grey','Discharged':'grey','On leave':'grey','Inactive':'grey','Overdue':'red'};return `<span class="tag ${m[s]||'grey'}">${esc(s)}</span>`;}
+
+/* ---------- Modal / CRUD ---------- */
+let editCtx=null;
+async function openModal(id,recId){
+  const cfg=TABLES[id]; editCtx={id,recId};
+  let rec={};
+  if(recId){ const { data }=await sb.from(id).select('*').eq('id',recId).single(); rec=data||{}; }
+  $('modalTitle').textContent=(recId?'Edit ':'Add ')+cfg.title.replace(/s$/,'');
+  $('modalBody').innerHTML=cfg.fields.map(f=>{
+    const val=rec[f.k]??'';
+    let input;
+    if(f.opt) input=`<select id="f_${f.k}">${f.opt.map(o=>`<option ${o==val?'selected':''}>${o}</option>`).join('')}</select>`;
+    else input=`<input id="f_${f.k}" type="${f.type||'text'}" value="${esc(val)}">`;
+    return `<div class="field ${f.half?'half':''}"><label>${f.l}</label>${input}</div>`;
+  }).join('');
+  $('modalSave').onclick=saveRec;
+  $('overlay').classList.add('show');
+}
+function closeModal(){ $('overlay').classList.remove('show'); editCtx=null; }
+async function saveRec(){
+  const cfg=TABLES[editCtx.id]; const obj={};
+  cfg.fields.forEach(f=>{ let v=$('f_'+f.k).value; if(f.type==='number') v=Number(v)||0; obj[f.k]=v===''?null:v; });
+  $('modalSave').disabled=true;
+  let error;
+  if(editCtx.recId) ({error}=await sb.from(editCtx.id).update(obj).eq('id',editCtx.recId));
+  else              ({error}=await sb.from(editCtx.id).insert(obj));
+  $('modalSave').disabled=false;
+  if(error){ alert('Could not save: '+error.message); return; }
+  closeModal(); render();
+}
+async function del(id,recId){
+  if(!confirm('Delete this record? This cannot be undone.')) return;
+  const { error }=await sb.from(id).delete().eq('id',recId);
+  if(error){ alert('Could not delete: '+error.message); return; }
+  render();
+}
+
+/* ---------- User accounts (admin only) ---------- */
+async function renderUsers(v){
+  if(ME.role!=='admin'){ v.innerHTML='<div class="empty">Admins only.</div>'; return; }
+  const { data:profiles, error }=await sb.from('profiles').select('*').order('created_at',{ascending:true});
+  if(error){ v.innerHTML='<div class="empty">'+esc(error.message)+'</div>'; return; }
+  v.innerHTML=`
+  <div class="card"><div class="body" style="font-size:13.5px;color:var(--muted);line-height:1.6">
+    <strong style="color:var(--ink)">Inviting new staff:</strong> in your Supabase dashboard go to
+    <strong>Authentication → Users → Add user → Send invite</strong>. They'll get an email to set a password,
+    then appear here as “Staff”. Promote anyone to admin below.
+  </div></div>
+  <div class="card"><div class="body" style="padding:0"><table>
+    <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+    <tbody>${profiles.map(p=>`<tr>
+      <td><strong>${esc(p.full_name||'—')}</strong>${p.id===ME.id?' <span class="tag grey">you</span>':''}</td>
+      <td>${esc(p.email)}</td>
+      <td>${p.id===ME.id?'<span class="tag green">Admin</span>':
+        `<select onchange="setRole('${p.id}',this.value)" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px">
+           <option value="staff" ${p.role==='staff'?'selected':''}>Staff</option>
+           <option value="admin" ${p.role==='admin'?'selected':''}>Admin</option>
+         </select>`}</td>
+    </tr>`).join('')}</tbody>
+  </table></div></div>`;
+}
+async function setRole(id,role){
+  const { error }=await sb.from('profiles').update({role}).eq('id',id);
+  if(error){ alert('Could not update role: '+error.message); render(); }
+}
+
+/* ---------- Utils ---------- */
+function fmtDate(d){ if(!d) return '—'; const dt=new Date(d); return isNaN(dt)?esc(d):dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------- Wire up & boot ---------- */
+$('signInBtn').onclick=signIn;
+$('forgotBtn').onclick=forgotPass;
+$('authPass').addEventListener('keydown',e=>{ if(e.key==='Enter') signIn(); });
+$('overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeModal(); });
+boot();
+</script>
+</body>
+</html>

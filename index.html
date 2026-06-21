@@ -118,6 +118,7 @@
   .menu-toggle{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--green-dark)}
 
   /* ---------- Duty Monitor ---------- */
+  .dm-sticky{position:sticky;top:62px;z-index:4;background:var(--bg);padding:10px 0 12px;margin-bottom:4px;box-shadow:0 10px 10px -8px rgba(20,60,40,.12)}
   .dm-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
   .dm-bar label.dm-lbl{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
   .dm-bar input[type=date],.dm-bar select,.dm-bar input[type=search]{padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#fff;font-family:inherit}
@@ -492,6 +493,7 @@ async function renderDuties(v){
   const roleOpts=['<option value="">All roles</option>'].concat(DUTY_CATALOG.map(g=>`<option ${g.r===dutyRole?'selected':''}>${esc(g.r)}</option>`)).join('');
   const shownRoles=roles.filter(g=> !dutyRole || g.role===dutyRole);
   let html=`<div class="dm" style="zoom:${dutyFz/100}">
+   <div class="dm-sticky">
    <div class="dm-bar">
      <label class="dm-lbl">Date <input type="date" value="${dutyDate}" onchange="dutyDate=this.value;render()"></label>
      <select onchange="dutyRole=this.value;render()">${roleOpts}</select>
@@ -506,7 +508,8 @@ async function renderDuties(v){
      <div class="dm-tile r"><div class="n">${pending}</div><div class="l">⚠ Pending today</div></div>
      <div class="dm-trend"><div class="lab">Last 7 days</div><div class="spark">${trend.map(p2=>`<i style="height:${Math.max(5,p2*0.4)}px;opacity:${p2?1:.3}"></i>`).join('')}</div></div>
    </div>
-   <div class="dm-split"><div class="g" style="width:${pct}%"></div><div class="r" style="width:${100-pct}%"></div></div>`;
+   <div class="dm-split"><div class="g" style="width:${pct}%"></div><div class="r" style="width:${100-pct}%"></div></div>
+   </div>`;
   html += shownRoles.map(g=>{
     let items=g.items.filter(it=> (!dutyOnlyPending || !it.isDone) && (!q || it.txt.toLowerCase().includes(q) || g.role.toLowerCase().includes(q)));
     if(!items.length) return '';

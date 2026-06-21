@@ -227,6 +227,19 @@
   </div>
 </div>
 
+<!-- Set-new-password screen (after a reset link) -->
+<div id="resetScreen" class="auth-wrap hidden">
+  <div class="auth-card">
+    <div class="mark">M</div>
+    <h1>Set a new password</h1>
+    <p class="tag-line">Choose a new password for your account</p>
+    <div id="resetMsg" class="auth-msg hidden"></div>
+    <div class="field"><label>New password</label><input id="resetPass" type="password" autocomplete="new-password" placeholder="At least 6 characters"></div>
+    <div class="field"><label>Confirm new password</label><input id="resetPass2" type="password" autocomplete="new-password" placeholder="Re-type it"></div>
+    <button class="btn" id="resetBtn" style="width:100%;margin-top:4px">Update password</button>
+  </div>
+</div>
+
 <!-- Main app -->
 <div id="appScreen" class="app hidden">
   <aside class="sidebar" id="sidebar">
@@ -278,14 +291,15 @@ function configMissing(){
   return !SUPABASE_URL || SUPABASE_URL.includes('YOUR-PROJECT') ||
          !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes('YOUR-ANON');
 }
-function show(screen){ ['configScreen','authScreen','appScreen'].forEach(s=>$(s).classList.toggle('hidden',s!==screen)); }
+function show(screen){ ['configScreen','authScreen','appScreen','resetScreen'].forEach(s=>$(s).classList.toggle('hidden',s!==screen)); }
 
 async function boot(){
   if(configMissing()){ show('configScreen'); return; }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  sb.auth.onAuthStateChange((ev,s)=>{ if(ev==='PASSWORD_RECOVERY'){ show('resetScreen'); return; } if(!s) show('authScreen'); });
+  if((location.hash||'').includes('type=recovery')){ show('resetScreen'); return; }
   const { data:{ session } } = await sb.auth.getSession();
   if(session) await startApp(); else show('authScreen');
-  sb.auth.onAuthStateChange((_e,s)=>{ if(!s) show('authScreen'); });
 }
 
 /* ---------- Auth ---------- */
@@ -307,6 +321,19 @@ async function forgotPass(){
   authMsg(error? error.message : 'Password reset link sent — check your email.', error?'err':'ok');
 }
 async function signOut(){ await sb.auth.signOut(); ME=null; show('authScreen'); }
+function resetMsg(t,k){ const m=$('resetMsg'); m.textContent=t; m.className='auth-msg '+(k||'err'); m.classList.toggle('hidden',!t); }
+async function doReset(){
+  const p1=$('resetPass').value, p2=$('resetPass2').value;
+  if(!p1 || p1.length<6){ resetMsg('Password must be at least 6 characters.'); return; }
+  if(p1!==p2){ resetMsg('The two passwords do not match.'); return; }
+  $('resetBtn').disabled=true; resetMsg('');
+  const { error }=await sb.auth.updateUser({ password:p1 });
+  $('resetBtn').disabled=false;
+  if(error){ resetMsg(error.message); return; }
+  resetMsg('Password updated ✓  Redirecting to sign in…','ok');
+  try{ history.replaceState(null,'',location.pathname); }catch(e){}
+  setTimeout(()=>{ try{location.hash='';}catch(e){} show('authScreen'); }, 1600);
+}
 
 async function startApp(){
   const { data:{ user } } = await sb.auth.getUser();
@@ -738,6 +765,8 @@ function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&l
 /* ---------- Wire up & boot ---------- */
 $('signInBtn').onclick=signIn;
 $('forgotBtn').onclick=forgotPass;
+$('resetBtn').onclick=doReset;
+$('resetPass2').addEventListener('keydown',e=>{ if(e.key==='Enter') doReset(); });
 $('authPass').addEventListener('keydown',e=>{ if(e.key==='Enter') signIn(); });
 $('overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeModal(); });
 boot();

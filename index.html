@@ -185,6 +185,10 @@
   .dm-modal .li:last-child{border:none}.dm-modal .li span{color:var(--muted);font-size:12px}
   .dm-modal .foot{padding:13px 20px;border-top:1px solid var(--line)}
   .dm-modal .foot button{width:100%;border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;background:#e23b30;color:#fff;font-size:15px}
+  .dm-modal .foot.dm-respond label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px}
+  .dm-modal .foot.dm-respond textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:14.5px;font-family:inherit;resize:vertical;margin-bottom:10px}
+  .dm-modal .foot.dm-respond button{background:#1f7a4a}
+  .dm-modal .foot.dm-respond button:disabled{background:#bcd4c4;cursor:not-allowed}
   @media(max-width:760px){.dm-summary{grid-template-columns:1fr 1fr}.dm-ring{grid-column:1/-1;justify-self:center}}
 </style>
 </head>
@@ -441,6 +445,8 @@ async function renderDuties(v){
   const { data, error } = await sb.from('duty_log').select('*').eq('date', dutyDate);
   if(error){ v.innerHTML='<div class="empty">'+esc(error.message)+'</div>'; return; }
   const done={}; (data||[]).forEach(r=>{ done[r.duty_key]=r; });
+  const dutyNudgeMap={};
+  try{ const { data:nz }=await sb.from('duty_nudges').select('*').eq('date', dutyDate); (nz||[]).forEach(n=>{ dutyNudgeMap[n.duty_key]=n; }); }catch(e){}
   let trend=[0,0,0,0,0,0,0];
   try{
     const start=new Date(dutyDate); start.setDate(start.getDate()-6);
@@ -489,7 +495,7 @@ async function renderDuties(v){
           <td>${esc(it.txt)}</td>
           <td>${it.isDone?'<span class="dm-pill ok">✓ Done</span>':'<span class="dm-pill gap">⚠ Not done</span>'}</td>
           <td class="dm-by">${it.isDone?esc(it.rec.marked_by||'—'):''}</td>
-          <td>${it.isDone?'':(dutyNudged[it.key]?'<span class="dm-nudge sent">✓ Asked</span>':`<button class="dm-nudge" onclick="dutyNudgeStaff('${it.key}')">📣 Ask staff</button>`)}</td>
+          <td>${it.isDone?'':(()=>{ const n=dutyNudgeMap[it.key]; if(n&&n.response) return `<span class="dm-nudge sent" title="${esc(n.response)}">💬 ${esc(n.response.length>16?n.response.slice(0,16)+'…':n.response)}</span>`; if(n) return '<span class="dm-nudge sent">Asked — awaiting reply</span>'; return `<button class="dm-nudge" onclick="dutyNudgeStaff('${it.key}')">📣 Ask staff</button>`; })()}</td>
         </tr>`).join('')}</tbody></table>
       ${items.length>3?`<button class="dm-more" onclick="dutyToggleRole(${g.ri})">${exp?'▴ Show less':('▾ Show '+hidden+' more')}</button>`:''}
     </div>`;
@@ -513,9 +519,10 @@ async function dutyNudgeStaff(key){
   dutyNudged[key]=true; render();
 }
 function dutyTestAlarm(){ fireDutyAlarm(true, dutyDate); }
-function dutyStopSound(){ if(_dmStop){clearTimeout(_dmStop);_dmStop=null;} if(_dmCtx){try{_dmCtx.close();}catch(e){}_dmCtx=null;} }
-function dutyBeep(){
-  dutyStopSound();
+let _dmLoop=false, _dmLoopT=null;
+function dutyStopSound(){ _dmLoop=false; if(_dmLoopT){clearInterval(_dmLoopT);_dmLoopT=null;} if(_dmStop){clearTimeout(_dmStop);_dmStop=null;} if(_dmCtx){try{_dmCtx.close();}catch(e){}_dmCtx=null;} }
+function dutyPlayCycle(){
+  if(_dmCtx){try{_dmCtx.close();}catch(e){}}
   try{
     const ctx=new (window.AudioContext||window.webkitAudioContext)(); _dmCtx=ctx;
     const t0=ctx.currentTime, master=ctx.createGain(); master.gain.value=0.9; master.connect(ctx.destination);
@@ -526,8 +533,12 @@ function dutyBeep(){
       gg.gain.setValueAtTime(0.9,t0+t+0.4); gg.gain.exponentialRampToValueAtTime(0.0001,t0+t+0.48);
       o.start(t0+t); o.stop(t0+t+0.5);
     }
-    _dmStop=setTimeout(dutyStopSound, DUTY_ALARM_SECONDS*1000+200);
   }catch(e){}
+}
+function dutyBeep(loop){
+  dutyStopSound(); dutyPlayCycle();
+  if(loop){ _dmLoop=true; _dmLoopT=setInterval(()=>{ if(_dmLoop) dutyPlayCycle(); }, DUTY_ALARM_SECONDS*1000); }
+  else { _dmStop=setTimeout(dutyStopSound, DUTY_ALARM_SECONDS*1000+200); }
 }
 function dutyShowModal(title, listHtml, dateStr){
   let ov=document.getElementById('dmAlarmOv');
@@ -546,15 +557,39 @@ async function fireDutyAlarm(test, dateArg){
   dutyShowModal(pend.length+' '+(pend.length===1?'duty':'duties')+' still pending', list, d);
   dutyBeep();
 }
+let _dmNudgeIds=[];
 async function dutyCheckNudges(){
   if(!ME || !ME.job_role) return;
+  const open=document.getElementById('dmNudgeOv');
+  if(open && open.classList.contains('show')) return;   // already answering
   const today=new Date().toLocaleDateString('en-CA');
   const { data }=await sb.from('duty_nudges').select('*').eq('role', ME.job_role).eq('acknowledged', false).eq('date', today);
-  if(data && data.length){
-    const list=data.map(n=>`<div class="li"><div>${esc(n.duty_text||n.duty_key)}</div><span>asked by ${esc(n.created_by||'admin')}</span></div>`).join('');
-    dutyShowModal('Follow-up requested', list, today); dutyBeep();
-    await sb.from('duty_nudges').update({acknowledged:true}).in('id', data.map(n=>n.id));
-  }
+  if(data && data.length) dutyShowNudge(data);          // NOT acknowledged until they reply
+}
+function dutyShowNudge(nudges){
+  _dmNudgeIds=nudges.map(n=>n.id);
+  let ov=document.getElementById('dmNudgeOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='dmNudgeOv'; ov.className='dm-ov'; document.body.appendChild(ov); }
+  const list=nudges.map(n=>`<div class="li"><div>${esc(n.duty_text||n.duty_key)}</div><span>asked by ${esc(n.created_by||'admin')}</span></div>`).join('');
+  ov.innerHTML=`<div class="dm-modal"><div class="top"><div class="bell">🔔</div><h2>Follow-up requested</h2><p>From the admin · respond to continue</p></div>
+    <div class="list">${list}</div>
+    <div style="padding:0 20px 4px;font-size:12.5px;color:var(--muted)">🔁 This alarm keeps ringing until you type a response and send it.</div>
+    <div class="foot dm-respond">
+      <label>Your response to the admin (required)</label>
+      <textarea id="dmRespMsg" placeholder="e.g. 'Will finish by 3 PM' or 'Short-staffed, need help'" oninput="document.getElementById('dmSendBtn').disabled=!this.value.trim()"></textarea>
+      <button id="dmSendBtn" disabled onclick="dutyRespondNudge()">✓ Send response</button>
+    </div></div>`;
+  ov.classList.add('show');
+  dutyBeep(true);   // loops until they respond
+}
+async function dutyRespondNudge(){
+  const box=document.getElementById('dmRespMsg'); const msg=(box.value||'').trim();
+  if(!msg){ box.style.borderColor='var(--danger)'; box.focus(); return; }
+  const { error }=await sb.from('duty_nudges').update({acknowledged:true, response:msg}).in('id', _dmNudgeIds);
+  if(error){ alert('Could not send: '+error.message); return; }
+  dutyStopSound();
+  const ov=document.getElementById('dmNudgeOv'); if(ov) ov.classList.remove('show');
+  _dmNudgeIds=[];
 }
 function dutyCheckAlarm(){
   const now=new Date();

@@ -6,6 +6,7 @@
 <title>MAHAN Trust — Admin Portal</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
 <style>
   :root{
     --green:#1b7a4b; --green-dark:#13593a; --green-light:#e8f3ec;
@@ -117,6 +118,22 @@
   }
   .menu-toggle{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--green-dark)}
 
+  /* ---------- Daily Reports (SharePoint upload) ---------- */
+  .dr-row{display:flex;gap:14px;flex-wrap:wrap}
+  .dr-row .field{flex:1;min-width:170px}
+  .dr-drop{border:2px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;cursor:pointer;color:var(--muted);background:#fcfdfc;transition:.15s}
+  .dr-drop:hover,.dr-drop.over{border-color:var(--green);background:var(--green-light);color:var(--ink)}
+  .dr-drop .big{font-size:28px}
+  .dr-drop strong{color:var(--green-dark)}
+  .dr-drop .hint{font-size:12px;margin-top:4px}
+  .dr-filebox{display:none;margin-top:12px;padding:11px 14px;border:1px solid var(--line);border-radius:8px;background:#f7faf8;font-size:13.5px;align-items:center;justify-content:space-between}
+  .dr-filebox.show{display:flex}
+  .dr-filebox .x{cursor:pointer;color:var(--muted);font-weight:700;padding:0 6px}
+  .dr-status{font-size:13px;margin-left:12px}
+  .dr-status.ok{color:var(--green-dark);font-weight:600}
+  .dr-status.err{color:var(--danger);font-weight:600}
+  .dr-note{font-size:12px;color:var(--muted);margin-top:12px;line-height:1.5}
+
   /* ---------- Duty Monitor ---------- */
   .dm-sticky{position:sticky;top:62px;z-index:4;background:var(--bg);padding:10px 0 12px;margin-bottom:4px;box-shadow:0 10px 10px -8px rgba(20,60,40,.12)}
   .dm-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
@@ -201,6 +218,14 @@
 <script>
   const SUPABASE_URL      = "https://tfgvhxreacvlamwwlplp.supabase.co";
   const SUPABASE_ANON_KEY = "sb_publishable_gTBWgqsAlWwnaTyQvFV8lQ_RVnWy2A9";
+
+  /* ---- SharePoint upload (Daily Reports tab) ----
+     These IDs are public by design for a single-page app — not secrets. */
+  const SP_CLIENT_ID   = "8b466ce2-e6ea-4b28-abb1-5ad79d351221";  // Application (client) ID
+  const SP_TENANT_ID   = "d0fc234c-6eb4-455d-b5cb-8d330722b1cb";  // Directory (tenant) ID
+  const SP_SITE_HOST   = "mahantrustorg.sharepoint.com";          // SharePoint hostname
+  const SP_SITE_PATH   = "/sites/DRMT";                           // site path
+  const SP_BASE_FOLDER = "Daily Duty Reports";                    // top folder in the site's document library
 </script>
 
 <!-- Config-not-set screen -->
@@ -363,6 +388,7 @@ const NAV = [
     {id:'inventory',ic:'📦',label:'Inventory',sub:'Medicines & supplies'},
     {id:'events',ic:'📅',label:'Calendar',sub:'Camps, meetings & events'},
     {id:'duties',ic:'🗂️',label:'Duty Monitor',sub:'Daily staff duty tracking'},
+    {id:'duty_reports',ic:'📤',label:'Daily Reports',sub:'On-duty monitor report uploads'},
   ]},
   {group:'People & Funds',items:[
     {id:'staff_members',ic:'👥',label:'Staff',sub:'Team & volunteers'},
@@ -412,6 +438,7 @@ async function render(){
   if(current==='dashboard')      await renderDashboard(v);
   else if(current==='programs')  v.innerHTML=programsHTML();
   else if(current==='duties')    await renderDuties(v);
+  else if(current==='duty_reports') await renderDutyReports(v);
   else if(current==='users')     await renderUsers(v);
   else                           await renderTable(v,current);
 }
@@ -759,6 +786,169 @@ async function setRole(id,role){
 async function setJobRole(id,jr){
   const { error }=await sb.from('profiles').update({job_role: jr||null}).eq('id',id);
   if(error){ alert('Could not update job role: '+error.message); render(); }
+}
+
+/* ---------- Daily Reports (SharePoint upload) module ---------- */
+let _msal=null, _spSiteId=null, _spDriveId=null;
+let drDate = new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd (for the date input)
+let drShift = 'Morning';
+let drFile = null;
+const SP_SCOPES = ['Files.ReadWrite.All','Sites.ReadWrite.All','User.Read'];
+
+function spConfigMissing(){ return !SP_CLIENT_ID || SP_CLIENT_ID.includes('YOUR-') || !SP_TENANT_ID || SP_TENANT_ID.includes('YOUR-'); }
+function msalApp(){
+  if(_msal) return _msal;
+  _msal = new msal.PublicClientApplication({
+    auth:{ clientId:SP_CLIENT_ID, authority:'https://login.microsoftonline.com/'+SP_TENANT_ID, redirectUri: window.location.origin },
+    cache:{ cacheLocation:'localStorage' }
+  });
+  return _msal;
+}
+async function spToken(interactive){
+  const app = msalApp();
+  await app.initialize();
+  let account = app.getAllAccounts()[0];
+  if(!account){
+    if(!interactive) throw new Error('not-signed-in');
+    const r = await app.loginPopup({ scopes:SP_SCOPES });
+    account = r.account;
+  }
+  try{
+    const r = await app.acquireTokenSilent({ scopes:SP_SCOPES, account });
+    return { token:r.accessToken, account };
+  }catch(e){
+    if(!interactive) throw e;
+    const r = await app.acquireTokenPopup({ scopes:SP_SCOPES });
+    return { token:r.accessToken, account:r.account };
+  }
+}
+async function gget(token,url){
+  const r = await fetch('https://graph.microsoft.com/v1.0'+url,{ headers:{ Authorization:'Bearer '+token } });
+  if(!r.ok) throw new Error('Graph '+r.status+': '+(await r.text()));
+  return r.json();
+}
+async function spResolveSite(token){
+  if(_spSiteId && _spDriveId) return;
+  const site = await gget(token,'/sites/'+SP_SITE_HOST+':'+SP_SITE_PATH);
+  _spSiteId = site.id;
+  const drive = await gget(token,'/sites/'+_spSiteId+'/drive');
+  _spDriveId = drive.id;
+}
+function ddmmyyyy(ymd){ const p=ymd.split('-'); return p[2]+'-'+p[1]+'-'+p[0]; }
+function spSanitize(name){ return String(name).replace(/[\\/:*?"<>|#%]/g,'-').replace(/\s+/g,' ').trim(); }
+async function spEnsureFolder(token,folderName){
+  // create SP_BASE_FOLDER/<folderName>; if it already exists Graph returns 409, which we ignore
+  await fetch('https://graph.microsoft.com/v1.0/sites/'+_spSiteId+'/drive/root:/'+encodeURIComponent(SP_BASE_FOLDER)+':/children',{
+    method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify({ name:folderName, folder:{}, '@microsoft.graph.conflictBehavior':'fail' })
+  });
+}
+async function spUploadFile(token,folderName,fileName,file){
+  const path = encodeURIComponent(SP_BASE_FOLDER)+'/'+encodeURIComponent(folderName)+'/'+encodeURIComponent(fileName);
+  const base = 'https://graph.microsoft.com/v1.0/sites/'+_spSiteId+'/drive/root:/'+path;
+  if(file.size <= 4*1024*1024){
+    const r = await fetch(base+':/content',{ method:'PUT', headers:{ Authorization:'Bearer '+token, 'Content-Type':file.type||'application/octet-stream' }, body:file });
+    if(!r.ok) throw new Error('Upload '+r.status+': '+(await r.text()));
+    return r.json();
+  }
+  // larger than 4 MB → chunked upload session
+  const s = await fetch(base+':/createUploadSession',{ method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ item:{ '@microsoft.graph.conflictBehavior':'replace' } }) });
+  if(!s.ok) throw new Error('Session '+s.status+': '+(await s.text()));
+  const { uploadUrl } = await s.json();
+  const chunk = 5*1024*1024; let start=0, last=null;
+  while(start < file.size){
+    const end = Math.min(start+chunk, file.size);
+    const r = await fetch(uploadUrl,{ method:'PUT', headers:{ 'Content-Range':'bytes '+start+'-'+(end-1)+'/'+file.size }, body:file.slice(start,end) });
+    if(![200,201,202].includes(r.status)) throw new Error('Chunk '+r.status+': '+(await r.text()));
+    if(r.status===200||r.status===201) last = await r.json();
+    start = end;
+  }
+  return last;
+}
+function drSetFile(f){
+  drFile = f||null;
+  const box=$('drFilebox'), btn=$('drUploadBtn');
+  if(box){
+    if(drFile){ box.classList.add('show'); box.innerHTML='<span>'+esc(drFile.name)+' ('+(drFile.size/1024).toFixed(1)+' KB)</span><span class="x" id="drClear" title="Remove">&times;</span>'; $('drClear').onclick=()=>drSetFile(null); }
+    else { box.classList.remove('show'); box.innerHTML=''; if($('drFileInput')) $('drFileInput').value=''; }
+  }
+  if(btn) btn.disabled = !drFile;
+}
+async function drUpload(){
+  if(!drFile) return;
+  const btn=$('drUploadBtn'), status=$('drStatus');
+  btn.disabled=true; status.className='dr-status'; status.textContent='Signing in…';
+  try{
+    const { token, account } = await spToken(true);
+    status.textContent='Preparing folder…';
+    await spResolveSite(token);
+    const folderName = ddmmyyyy(drDate);
+    await spEnsureFolder(token, folderName);
+    const emp = spSanitize(account.name || account.username || (ME&&ME.full_name) || 'Unknown');
+    const dot = drFile.name.includes('.') ? '.'+drFile.name.split('.').pop() : '';
+    const fileName = spSanitize(emp+' '+folderName)+dot;
+    status.textContent='Uploading…';
+    await spUploadFile(token, folderName, fileName, drFile);
+    status.className='dr-status ok'; status.textContent='✓ Uploaded to SharePoint';
+    drFile=null;
+    setTimeout(render, 600);
+  }catch(e){
+    status.className='dr-status err';
+    status.textContent = (String(e.message||e)==='not-signed-in') ? 'Sign-in needed.' : ('Upload failed: '+(e.message||e));
+    btn.disabled=false;
+  }
+}
+async function drRecent(){
+  try{
+    const { token } = await spToken(false);          // silent only — never pops during render
+    await spResolveSite(token);
+    const data = await gget(token,'/sites/'+_spSiteId+'/drive/root:/'+encodeURIComponent(SP_BASE_FOLDER)+':/children?$orderby=name%20desc&$top=30');
+    return data.value||[];
+  }catch(e){ return null; }                           // null = not signed in yet
+}
+function drRecentHTML(recent){
+  if(recent===null) return '<div class="empty">Sign in with the Upload button above to see recent reports from SharePoint.</div>';
+  const folders=(recent||[]).filter(it=>it.folder);
+  if(!folders.length) return '<div class="empty">No reports uploaded yet.</div>';
+  const rows=folders.map(it=>{ const c=it.folder.childCount||0; return `<tr><td><strong>${esc(it.name)}</strong></td><td>${c} file${c===1?'':'s'}</td><td><a href="${esc(it.webUrl)}" target="_blank" rel="noopener">Open in SharePoint ↗</a></td></tr>`; }).join('');
+  return `<table><thead><tr><th>Date (DD-MM-YYYY)</th><th>Files</th><th>Open</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+async function renderDutyReports(v){
+  if(spConfigMissing()){ v.innerHTML='<div class="empty">SharePoint upload isn’t configured yet — add the Client ID and Tenant ID in the CONFIG block.</div>'; return; }
+  const recent = await drRecent();
+  v.innerHTML = `
+  <div class="card">
+    <h3>⬆ Upload today's duty report</h3>
+    <div class="body">
+      <div class="dr-row">
+        <div class="field"><label>Report Date</label><input type="date" id="drDate" value="${drDate}"></div>
+        <div class="field"><label>Shift</label><select id="drShift">${['Morning','Afternoon','Night','Full Day'].map(s=>`<option ${s===drShift?'selected':''}>${s}</option>`).join('')}</select></div>
+      </div>
+      <div class="field">
+        <label>Report File</label>
+        <div class="dr-drop" id="drDrop"><div class="big">📄</div><div><strong>Click to choose</strong>, or drag &amp; drop your report</div><div class="hint">Uploaded exactly as-is — no changes (PDF, Word, Excel, photo…)</div></div>
+        <input type="file" id="drFileInput" style="display:none">
+        <div class="dr-filebox" id="drFilebox"></div>
+      </div>
+      <button class="btn" id="drUploadBtn" disabled>⬆ Upload to SharePoint</button>
+      <span id="drStatus" class="dr-status"></span>
+      <p class="dr-note">Saved to <b>${esc(SP_BASE_FOLDER)}</b> → a new folder for each date (DD-MM-YYYY), file named “<i>your name</i> DD-MM-YYYY”. You sign into Microsoft the first time only.</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>📑 Recent reports</h3>
+    <div class="body" style="padding:0">${drRecentHTML(recent)}</div>
+  </div>`;
+  $('drDate').onchange=e=>{ drDate=e.target.value; };
+  $('drShift').onchange=e=>{ drShift=e.target.value; };
+  const fi=$('drFileInput'), drop=$('drDrop');
+  drop.onclick=()=>fi.click();
+  fi.onchange=e=>drSetFile(e.target.files[0]);
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+  drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) drSetFile(e.dataTransfer.files[0]); });
+  $('drUploadBtn').onclick=drUpload;
+  drSetFile(drFile);
 }
 
 /* ---------- Utils ---------- */
